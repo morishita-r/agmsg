@@ -1,35 +1,86 @@
-name: Temporary Audio Smoke
+name: Build G-Certificate Podcast Audio
 
 on:
   pull_request:
     branches:
       - main
+    paths:
+      - podcast/**
+      - .github/workflows/temp-audio-smoke.yml
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: gcert-podcast-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: false
+
 jobs:
-  smoke:
+  build:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 180
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Synthesize Japanese voice samples
+
+      - name: Install audio dependencies
         run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg zip
           python -m pip install --upgrade pip
           python -m pip install edge-tts
-          edge-tts --voice ja-JP-NanamiNeural --text '女性音声の確認です。明朗で聞き取りやすく読み上げます。' --write-media female.mp3
-          edge-tts --voice ja-JP-KeitaNeural --text '男性音声の確認です。正解と解説を分かりやすく説明します。' --write-media male.mp3
-          ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 female.mp3
-          ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 male.mp3
-      - uses: actions/upload-artifact@v4
+          ffmpeg -version | head -1
+
+      - name: Reconstruct and validate source CSV
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat podcast/source.part*.b64 > /tmp/gcert-source.b64
+          test "$(sha256sum /tmp/gcert-source.b64 | cut -d' ' -f1)" = "c3b16823599f72968f1b9e75a23bd6b2a5765f9a7460a5b70eb6630b482a9426"
+          base64 --decode /tmp/gcert-source.b64 | gzip -dc > 'podcast/G検定模試1_問題1-145.csv'
+          test "$(sha256sum 'podcast/G検定模試1_問題1-145.csv' | cut -d' ' -f1)" = "22fc491b39de8c54a881b4e3ef05ee84a172e50097bad367b710ecba24f4efbc"
+          python - <<'PY'
+          import csv
+          from pathlib import Path
+          path = Path('podcast/G検定模試1_問題1-145.csv')
+          with path.open(encoding='utf-8-sig', newline='') as f:
+              rows = list(csv.DictReader(f))
+          assert len(rows) == 145, len(rows)
+          assert [row['ID'] for row in rows] == [str(i) for i in range(1, 146)]
+          print('CSV verification passed:', len(rows), 'rows')
+          PY
+
+      - name: Generate podcast audio
+        run: |
+          set -euo pipefail
+          python podcast/build.py 2>&1 | tee podcast-build.log
+
+      - name: Package and verify outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s 'podcast-output/G検定模試1_Podcast教材音声_全編.mp3'
+          test "$(find podcast-output/episodes -maxdepth 1 -name '*.mp3' | wc -l)" -eq 10
+          ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 'podcast-output/G検定模試1_Podcast教材音声_全編.mp3'
+          zip -9 -r 'podcast-output/G検定模試1_Podcast教材音声_分割版.zip' \
+            podcast-output/episodes \
+            'podcast-output/G検定模試1_Podcast台本.txt' \
+            'podcast-output/G検定模試1_Podcast_manifest.json' \
+            'podcast-output/G検定模試1_Podcast検証結果.txt'
+          cp podcast-build.log podcast-output/podcast-build.log
+          ls -lh podcast-output podcast-output/episodes
+
+      - name: Upload podcast artifact
+        uses: actions/upload-artifact@v4
         with:
-          name: tts-smoke-artifact
-          path: |
-            female.mp3
-            male.mp3
+          name: gcert-podcast-audio
+          path: podcast-output/
           compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
