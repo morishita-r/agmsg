@@ -1,9 +1,10 @@
 name: Temporary Audio Smoke
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/gcert-podcast-audio
+      - main
+  workflow_dispatch:
 
 permissions:
   contents: read
