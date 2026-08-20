@@ -1,0 +1,22 @@
+name: Temporary Audio Smoke
+
+on:
+  push:
+    branches:
+      - agent/gcert-podcast-audio
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          echo 'public actions work' > smoke.txt
+          ffmpeg -version | head -1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smoke-artifact
+          path: smoke.txt
