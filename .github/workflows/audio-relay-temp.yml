@@ -1,0 +1,41 @@
+name: Temporary Audio Relay
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/audio-relay-temp.yml'
+      - 'AUDIO_RELAY_TEMP.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  relay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download generated voice test
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p relay
+          curl --fail --location --retry 5 --retry-all-errors \
+            'https://g-certificate-git-agent-podcast-au-13f17a-morishita-rs-projects.vercel.app/podcast/voice-test-multispeaker.mp3' \
+            --output relay/voice-test-multispeaker.mp3
+          curl --fail --location --retry 5 --retry-all-errors \
+            'https://g-certificate-git-agent-podcast-au-13f17a-morishita-rs-projects.vercel.app/podcast/voice-test-result.json' \
+            --output relay/voice-test-result.json
+          test "$(stat -c%s relay/voice-test-multispeaker.mp3)" -gt 5000
+          file relay/*
+          sha256sum relay/* > relay/SHA256SUMS.txt
+      - name: Upload relay artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: voice-test-relay
+          path: relay/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
