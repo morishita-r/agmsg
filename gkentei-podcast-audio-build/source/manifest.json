@@ -1,0 +1,17 @@
+{
+  "edition": "approved-new-script",
+  "approved_transcript_sha256": "700fe7cc459bd8ecb4a43d9a0c829ffcc4d1f302eb0e14407c97b5e6ec0b706e",
+  "transcript_gzip_sha256": "8dd1a0488b475d0663d0a7215c4220c5a093597fb6f9abfbd36b920e59b887ce",
+  "build_script_sha256": "d73377adbe4f1147c39408d2379bf11195344c75e661dad3a057bc5078356722",
+  "build_script_gzip_sha256": "d2928b4bfb6864b1698ee0ed22adce825674938749a8b26a28df218c3ecef94a",
+  "chapter_count": 10,
+  "speech_event_count": 876,
+  "mina_event_count": 434,
+  "shin_event_count": 442,
+  "thinking_pause_count": 47,
+  "approved_opening": {
+    "mina": "シンさん。生成AIに「分かりました」と言われると、ちょっと安心しますよね。",
+    "shin": "うん。でもG検定の最初の落とし穴は、その「分かりました」を人間と同じ意味で受け取っていいのか、です。"
+  },
+  "old_audio_reuse_allowed": false
+}
