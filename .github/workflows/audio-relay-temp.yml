@@ -1,0 +1,129 @@
+name: Temporary G-Certificate Podcast Build
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/audio-relay-temp.yml'
+      - '.audio_bundle/source.tar.gz'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: g-certificate-podcast-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore approved transcript and build script
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'de62eac5829808620e4ad1312e0dc9816265dd10eaeeea16e6553f53d3281a69  .audio_bundle/source.tar.gz' | sha256sum --check -
+          tar -xzf .audio_bundle/source.tar.gz
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate all ten chapters
+        run: python podcast_audio/build_audio.py validate --transcript podcast_audio/G検定_Podcast台本_TTS用.txt
+
+  synthesize:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        chapter: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore approved transcript and build script
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'de62eac5829808620e4ad1312e0dc9816265dd10eaeeea16e6553f53d3281a69  .audio_bundle/source.tar.gz' | sha256sum --check -
+          tar -xzf .audio_bundle/source.tar.gz
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install neural speech synthesizer
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install 'edge-tts>=7.2,<8'
+          ffmpeg -version | head -1
+      - name: Synthesize chapter ${{ matrix.chapter }}
+        run: >-
+          python podcast_audio/build_audio.py synthesize
+          --transcript podcast_audio/G検定_Podcast台本_TTS用.txt
+          --chapter ${{ matrix.chapter }}
+          --output-dir dist
+      - name: Verify chapter audio
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(find dist -maxdepth 1 -name '第??講_*.mp3' | wc -l)" -eq 1
+          mp3="$(find dist -maxdepth 1 -name '第??講_*.mp3' -print -quit)"
+          ffprobe -v error -show_entries format=duration,size -show_entries stream=codec_name,sample_rate,channels -of json "$mp3"
+          test "$(stat -c%s "$mp3")" -gt 100000
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chapter-${{ matrix.chapter }}
+          path: |
+            dist/第??講_*.mp3
+            dist/chapter_??.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  package:
+    needs: synthesize
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore approved transcript and build script
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'de62eac5829808620e4ad1312e0dc9816265dd10eaeeea16e6553f53d3281a69  .audio_bundle/source.tar.gz' | sha256sum --check -
+          tar -xzf .audio_bundle/source.tar.gz
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: chapter-*
+          path: downloaded
+      - name: Build full edition and delivery archive
+        run: >-
+          python podcast_audio/build_audio.py package
+          --source-dir downloaded
+          --transcript podcast_audio/G検定_Podcast台本_TTS用.txt
+          --output-dir final
+      - name: Validate completed package
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s 'G検定_Podcast音声一式.zip'
+          test -s 'final/G検定_講義Podcast_全10講.mp3'
+          test "$(find final/講別MP3 -name '*.mp3' | wc -l)" -eq 10
+          ffprobe -v error -show_entries format=duration,size -show_entries stream=codec_name,sample_rate,channels -of json 'final/G検定_講義Podcast_全10講.mp3'
+          sha256sum 'G検定_Podcast音声一式.zip' 'final/G検定_講義Podcast_全10講.mp3' > DELIVERY_SHA256SUMS.txt
+          cat build-result.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Gkentei-Podcast-Audio-Final
+          path: |
+            G検定_Podcast音声一式.zip
+            build-result.json
+            DELIVERY_SHA256SUMS.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
