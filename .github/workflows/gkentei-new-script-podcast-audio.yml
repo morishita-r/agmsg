@@ -1,0 +1,164 @@
+name: Build approved Gkentei new-script podcast audio
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/gkentei-new-script-podcast-audio.yml"
+      - "gkentei-podcast-audio-build/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gkentei-approved-new-script-audio-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Restore immutable build inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          cat gkentei-podcast-audio-build/source/script/part_*.b64 \
+            | tr -d '\n' \
+            | base64 --decode \
+            | gzip --decompress \
+            > build/synthesize_podcast.py
+          echo "d73377adbe4f1147c39408d2379bf11195344c75e661dad3a057bc5078356722  build/synthesize_podcast.py" | sha256sum --check
+          python build/synthesize_podcast.py restore \
+            --parts-dir gkentei-podcast-audio-build/source/transcript \
+            --output build/approved_new_transcript.txt
+          echo "700fe7cc459bd8ecb4a43d9a0c829ffcc4d1f302eb0e14407c97b5e6ec0b706e  build/approved_new_transcript.txt" | sha256sum --check
+      - name: Validate approved new transcript
+        run: >-
+          python build/synthesize_podcast.py validate
+          --transcript build/approved_new_transcript.txt
+          --output validation.json
+      - name: Upload transcript validation
+        uses: actions/upload-artifact@v4
+        with:
+          name: approved-transcript-validation
+          path: validation.json
+          if-no-files-found: error
+          retention-days: 3
+
+  synthesize:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        chapter: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Restore immutable build inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          cat gkentei-podcast-audio-build/source/script/part_*.b64 \
+            | tr -d '\n' \
+            | base64 --decode \
+            | gzip --decompress \
+            > build/synthesize_podcast.py
+          echo "d73377adbe4f1147c39408d2379bf11195344c75e661dad3a057bc5078356722  build/synthesize_podcast.py" | sha256sum --check
+          python build/synthesize_podcast.py restore \
+            --parts-dir gkentei-podcast-audio-build/source/transcript \
+            --output build/approved_new_transcript.txt
+          echo "700fe7cc459bd8ecb4a43d9a0c829ffcc4d1f302eb0e14407c97b5e6ec0b706e  build/approved_new_transcript.txt" | sha256sum --check
+      - name: Install audio dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ffmpeg
+          python -m pip install --upgrade pip
+          python -m pip install "edge-tts>=7.2,<8"
+      - name: Synthesize chapter ${{ matrix.chapter }}
+        run: >-
+          python build/synthesize_podcast.py synthesize
+          --transcript build/approved_new_transcript.txt
+          --chapter ${{ matrix.chapter }}
+          --output-dir dist
+      - name: Upload chapter ${{ matrix.chapter }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: chapter-${{ matrix.chapter }}
+          path: |
+            dist/gkentei_new_script_chapter_*.mp3
+            dist/gkentei_new_script_chapter_*.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+
+  package:
+    needs: synthesize
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Restore immutable build inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          cat gkentei-podcast-audio-build/source/script/part_*.b64 \
+            | tr -d '\n' \
+            | base64 --decode \
+            | gzip --decompress \
+            > build/synthesize_podcast.py
+          echo "d73377adbe4f1147c39408d2379bf11195344c75e661dad3a057bc5078356722  build/synthesize_podcast.py" | sha256sum --check
+          python build/synthesize_podcast.py restore \
+            --parts-dir gkentei-podcast-audio-build/source/transcript \
+            --output build/approved_new_transcript.txt
+          echo "700fe7cc459bd8ecb4a43d9a0c829ffcc4d1f302eb0e14407c97b5e6ec0b706e  build/approved_new_transcript.txt" | sha256sum --check
+      - name: Install packaging dependency
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ffmpeg
+      - name: Download all chapter artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: chapter-*
+          path: downloaded
+          merge-multiple: true
+      - name: Build full edition, preview and archive
+        run: >-
+          python build/synthesize_podcast.py package
+          --source-dir downloaded
+          --transcript build/approved_new_transcript.txt
+          --output-dir final
+      - name: Upload completed new-script audio set
+        uses: actions/upload-artifact@v4
+        with:
+          name: Gkentei-New-Script-Podcast-Audio
+          path: |
+            final/**
+            gkentei_new_script_audio_bundle.zip
+            build_result_new_script.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
