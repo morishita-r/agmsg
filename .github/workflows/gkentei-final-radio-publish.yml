@@ -1,0 +1,165 @@
+name: Build and publish final Gkentei manga radio
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/gkentei-final-radio-publish.yml"
+      - "gkentei-final-radio-build/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: gkentei-final-radio-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Restore immutable sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          cat gkentei-final-radio-build/script/part_*.b64 | tr -d '\n' | base64 --decode | gzip --decompress > build/build_final_radio.py
+          cat gkentei-final-radio-build/transcript/part_*.b64 | tr -d '\n' | base64 --decode | gzip --decompress > build/final_tts.txt
+          echo "db41594da9c3a5dd37fa14dcaa5d4a9c1bc187b625088ef7c3a0c9074e087f72  build/build_final_radio.py" | sha256sum --check
+          echo "11eff3f937ce77bc7ee10a822d84fde37c76e9c6d3387b9cb9f8a819ca6d79a7  build/final_tts.txt" | sha256sum --check
+      - name: Validate exact final transcript
+        run: python build/build_final_radio.py validate --transcript build/final_tts.txt --output validation.json
+
+  synthesize:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        chapter: ["00", "01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12", "13", "14", "15", "16"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Restore immutable sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          cat gkentei-final-radio-build/script/part_*.b64 | tr -d '\n' | base64 --decode | gzip --decompress > build/build_final_radio.py
+          cat gkentei-final-radio-build/transcript/part_*.b64 | tr -d '\n' | base64 --decode | gzip --decompress > build/final_tts.txt
+          echo "db41594da9c3a5dd37fa14dcaa5d4a9c1bc187b625088ef7c3a0c9074e087f72  build/build_final_radio.py" | sha256sum --check
+          echo "11eff3f937ce77bc7ee10a822d84fde37c76e9c6d3387b9cb9f8a819ca6d79a7  build/final_tts.txt" | sha256sum --check
+      - name: Install audio dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ffmpeg
+          python -m pip install --upgrade pip
+          python -m pip install "edge-tts>=7.2,<8"
+      - name: Synthesize chapter ${{ matrix.chapter }}
+        run: python build/build_final_radio.py synthesize --transcript build/final_tts.txt --chapter "${{ matrix.chapter }}" --output-dir dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: publish-radio-chapter-${{ matrix.chapter }}
+          path: |
+            dist/gkentei_final_radio_chapter_*.mp3
+            dist/gkentei_final_radio_chapter_*.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+
+  package-and-publish:
+    needs: synthesize
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Restore immutable sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          cat gkentei-final-radio-build/script/part_*.b64 | tr -d '\n' | base64 --decode | gzip --decompress > build/build_final_radio.py
+          cat gkentei-final-radio-build/transcript/part_*.b64 | tr -d '\n' | base64 --decode | gzip --decompress > build/final_tts.txt
+          echo "db41594da9c3a5dd37fa14dcaa5d4a9c1bc187b625088ef7c3a0c9074e087f72  build/build_final_radio.py" | sha256sum --check
+          echo "11eff3f937ce77bc7ee10a822d84fde37c76e9c6d3387b9cb9f8a819ca6d79a7  build/final_tts.txt" | sha256sum --check
+      - name: Install packaging dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ffmpeg zip
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: publish-radio-chapter-*
+          path: downloaded
+          merge-multiple: true
+      - name: Build final delivery files
+        run: python build/build_final_radio.py package --source-dir downloaded --transcript build/final_tts.txt --output-dir final
+      - name: Prepare public delivery directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="delivery/final-radio-v1"
+          rm -rf "$target"
+          mkdir -p "$target"
+          cp final/gkentei_final_radio_preview_90s.mp3 "$target/"
+          cp final/gkentei_final_radio_preview_5min.mp3 "$target/"
+          cp final/gkentei_final_radio_pack1_ch00-04_40k.mp3 "$target/"
+          cp final/gkentei_final_radio_pack2_ch05-08_40k.mp3 "$target/"
+          cp final/gkentei_final_radio_pack3_ch09-12_40k.mp3 "$target/"
+          cp final/gkentei_final_radio_pack4_ch13-16_40k.mp3 "$target/"
+          cp final/gkentei_final_radio_tts.txt "$target/"
+          cp final/gkentei_final_radio_verification.json "$target/"
+          cp final/gkentei_final_radio_verification.txt "$target/"
+          cp final/gkentei_final_radio_SHA256SUMS.txt "$target/"
+          cp final/gkentei_final_radio_delivery_manifest.json "$target/"
+          full="final/gkentei_final_radio_full_light_40k.mp3"
+          if [ -f "$full" ] && [ "$(stat -c%s "$full")" -lt 95000000 ]; then
+            cp "$full" "$target/"
+          fi
+          (
+            cd "$target"
+            zip -0 gkentei_final_radio_packs_1-2.zip \
+              gkentei_final_radio_pack1_ch00-04_40k.mp3 \
+              gkentei_final_radio_pack2_ch05-08_40k.mp3 \
+              gkentei_final_radio_tts.txt \
+              gkentei_final_radio_verification.txt \
+              gkentei_final_radio_SHA256SUMS.txt
+            zip -0 gkentei_final_radio_packs_3-4.zip \
+              gkentei_final_radio_pack3_ch09-12_40k.mp3 \
+              gkentei_final_radio_pack4_ch13-16_40k.mp3 \
+              gkentei_final_radio_tts.txt \
+              gkentei_final_radio_verification.txt \
+              gkentei_final_radio_SHA256SUMS.txt
+          )
+          find "$target" -maxdepth 1 -type f -printf '%f %s bytes\n' | sort
+      - name: Commit delivery files to temporary branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- delivery/final-radio-v1
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "chore: publish final G検定 radio downloads [skip ci]"
+          git push origin "HEAD:${{ github.event.pull_request.head.ref || github.ref_name }}"
