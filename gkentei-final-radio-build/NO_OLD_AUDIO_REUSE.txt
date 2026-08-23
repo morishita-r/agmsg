@@ -1,0 +1,1 @@
+This build synthesizes all speech from the exact final transcript. No prior MP3 is copied or concatenated.
