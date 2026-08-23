@@ -1,0 +1,133 @@
+name: Build Gkentei Final Pass Audio
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".gkentei_final_audio/**"
+      - ".github/workflows/gkentei-final-pass-audio.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gkentei-final-pass-audio-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Restore immutable audio source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .gkentei_final_audio/part_*.b64 > source.tar.gz.b64
+          base64 --decode source.tar.gz.b64 > source.tar.gz
+          echo "6951bdd44bcaed87de513fd55e6d194a6ca1e5b272de73f62634e34549eb3390  source.tar.gz" | sha256sum --check
+          mkdir audio_source
+          tar -xzf source.tar.gz -C audio_source
+      - name: Install validation dependency
+        run: python -m pip install "pydub>=0.25,<1"
+      - name: Validate final transcript binding
+        run: python audio_source/build_audio.py validate | tee validation.json
+      - name: Upload validation evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-transcript-validation
+          path: validation.json
+          retention-days: 3
+
+  synthesize:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        chapter: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Restore immutable audio source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .gkentei_final_audio/part_*.b64 > source.tar.gz.b64
+          base64 --decode source.tar.gz.b64 > source.tar.gz
+          echo "6951bdd44bcaed87de513fd55e6d194a6ca1e5b272de73f62634e34549eb3390  source.tar.gz" | sha256sum --check
+          mkdir audio_source
+          tar -xzf source.tar.gz -C audio_source
+      - name: Install audio dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ffmpeg
+          python -m pip install --upgrade pip
+          python -m pip install -r audio_source/requirements.txt
+      - name: Synthesize chapter ${{ matrix.chapter }}
+        run: python audio_source/build_audio.py synthesize --chapter ${{ matrix.chapter }} --output-dir dist
+      - name: Upload chapter ${{ matrix.chapter }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-chapter-${{ matrix.chapter }}
+          path: |
+            dist/gkentei_final_pass_ch*.mp3
+            dist/chapter_*.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+
+  package:
+    needs: synthesize
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Restore immutable audio source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .gkentei_final_audio/part_*.b64 > source.tar.gz.b64
+          base64 --decode source.tar.gz.b64 > source.tar.gz
+          echo "6951bdd44bcaed87de513fd55e6d194a6ca1e5b272de73f62634e34549eb3390  source.tar.gz" | sha256sum --check
+          mkdir audio_source
+          tar -xzf source.tar.gz -C audio_source
+      - name: Install packaging dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ffmpeg
+          python -m pip install "pydub>=0.25,<1"
+      - name: Download all chapter artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: final-chapter-*
+          path: downloaded
+      - name: Build full editions and verify
+        run: python audio_source/build_audio.py package --source-dir downloaded --output-dir final
+      - name: Upload completed final audio set
+        uses: actions/upload-artifact@v4
+        with:
+          name: Gkentei-Final-Pass-Audio
+          path: final/**
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
