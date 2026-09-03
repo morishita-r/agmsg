@@ -1,0 +1,42 @@
+name: Export verified Gkentei VOICEVOX MP3
+
+on:
+  push:
+    branches:
+      - tmp/gkentei-voicevox-transfer-20260903
+    paths:
+      - ".github/workflows/export-gkentei-voicevox.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Download and verify the complete MP3
+        shell: bash
+        run: |
+          set -euo pipefail
+          FILE=gkentei_voicevox_zundamon_metan_full.mp3
+          curl --fail --location --retry 5 --retry-all-errors \
+            "https://tmpfiles.org/dl/wEwkhytQtRoS/gkentei_voicevox_zundamon_metan_full.mp3" \
+            --output "$FILE"
+          test "$(stat -c '%s' "$FILE")" -eq 34763940
+          echo "85f235e9ff616b6590a3ef790daa81a8b360381625ec844ea2c3fb6858453c40  $FILE" | sha256sum --check
+
+      - name: Publish a temporary public release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG=gkentei-voicevox-export-20260903
+          FILE=gkentei_voicevox_zundamon_metan_full.mp3
+          gh release delete "$TAG" --cleanup-tag --yes 2>/dev/null || true
+          gh release create "$TAG" "$FILE" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Temporary G検定 VOICEVOX complete audio" \
+            --notes "VOICEVOX:四国めたん / VOICEVOX:ずんだもん。検証済み完全版MP3。"
