@@ -28,15 +28,6 @@ jobs:
             "$URL" --output "$FILE"
           test "$(stat -c '%s' "$FILE")" -eq 53537740
           echo "c8f4f3a552271bdb6e9d650aa99ef220022a0ef81494da58bae9c722733891d1  $FILE" | sha256sum --check
-          ffmpeg -v error -i "$FILE" -f null -
-          DURATION=$(ffprobe -v error -show_entries format=duration \
-            -of default=noprint_wrappers=1:nokey=1 "$FILE")
-          python - "$DURATION" <<'PY'
-          import sys
-          duration=float(sys.argv[1])
-          assert abs(duration-8922.864) < 0.1, duration
-          print(f"Verified duration: {duration:.3f} seconds")
-          PY
 
       - name: Upload exactly one complete audio file
         uses: actions/upload-artifact@v4
