@@ -1,0 +1,48 @@
+name: Export Gkentei continuation VOICEVOX MP3
+
+on:
+  push:
+    branches:
+      - tmp/gkentei-continuation-transfer-20260904
+    paths:
+      - ".github/workflows/export-gkentei-continuation.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Download and verify the complete MP3
+        shell: bash
+        env:
+          SIGNED_URL_B64: "aHR0cHM6Ly9yZWxlYXNlLWFzc2V0cy5naXRodWJ1c2VyY29udGVudC5jb20vZ2l0aHViLXByb2R1Y3Rpb24tcmVsZWFzZS1hc3NldC8xMzA1NzE3NzA1LzVjMWEzNDBjLTEwODgtNDU2NS1hZjg1LTQ5NDQ4YTI3MjU0Mz9zcD1yJnN2PTIwMTgtMTEtMDkmc3I9YiZzcHI9aHR0cHMmc2U9MjAyNi0wOS0wM1QyMSUzQTQxJTNBMzZaJnJzY2Q9YXR0YWNobWVudCUzQitmaWxlbmFtZSUzRGdrZW50ZWlfY29udGludWF0aW9uX2NoMTEtMjRfdm9pY2V2b3hfenVuZGFtb25fbWV0YW5fZnVsbC5tcDMmcnNjdD1hcHBsaWNhdGlvbiUyRm9jdGV0LXN0cmVhbSZza29pZD05NmMyZDQxMC01NzExLTQzYTEtYWVkZC1hYjE5NDdhYTdhYjAmc2t0aWQ9Mzk4YTY2NTQtOTk3Yi00N2U5LWIxMmItOTUxNWI4OTZiNGRlJnNrdD0yMDI2LTA5LTAzVDIwJTNBNDAlM0E0OFomc2tlPTIwMjYtMDktMDNUMjElM0E0MSUzQTM2WiZza3M9YiZza3Y9MjAxOC0xMS0wOSZzaWc9R3RXeDZQWTBBREVFaSUyQmc3Z2hpbjBJSTFZSXhPYnpYb3hNRVVJemJPcm5BJTNEJmp3dD1leUowZVhBaU9pSktWMVFpTENKaGJHY2lPaUpJVXpJMU5pSjkuZXlKcGMzTWlPaUpuYVhSb2RXSXVZMjl0SWl3aVlYVmtJam9pY21Wc1pXRnpaUzFoYzNObGRITXVaMmwwYUhWaWRYTmxjbU52Ym5SbGJuUXVZMjl0SWl3aWEyVjVJam9pYTJWNU1TSXNJbVY0Y0NJNk1UYzRPRFEzTURneU5Td2libUptSWpveE56ZzRORFk1TURJMUxDSndZWFJvSWpvaWNtVnNaV0Z6WldGemMyVjBjSEp2WkhWamRHbHZiaTVpYkc5aUxtTnZjbVV1ZDJsdVpHOTNjeTV1WlhRaWZRLnRKSUlIaW54NGlERTZOZ2NsTWExNURuT1NUdnhIYU1Hb3VPMEZ4N25NcDQmcmVzcG9uc2UtY29udGVudC1kaXNwb3NpdGlvbj1hdHRhY2htZW50JTNCJTIwZmlsZW5hbWUlM0Rna2VudGVpX2NvbnRpbnVhdGlvbl9jaDExLTI0X3ZvaWNldm94X3p1bmRhbW9uX21ldGFuX2Z1bGwubXAzJnJlc3BvbnNlLWNvbnRlbnQtdHlwZT1hcHBsaWNhdGlvbiUyRm9jdGV0LXN0cmVhbQ=="
+        run: |
+          set -euo pipefail
+          FILE=gkentei_continuation_ch11-24_voicevox_zundamon_metan_full.mp3
+          URL=$(printf '%s' "$SIGNED_URL_B64" | base64 --decode)
+          curl --fail --location --retry 5 --retry-all-errors \
+            --connect-timeout 30 --max-time 900 \
+            "$URL" --output "$FILE"
+          test "$(stat -c '%s' "$FILE")" -eq 53537740
+          echo "c8f4f3a552271bdb6e9d650aa99ef220022a0ef81494da58bae9c722733891d1  $FILE" | sha256sum --check
+          ffmpeg -v error -i "$FILE" -f null -
+          DURATION=$(ffprobe -v error -show_entries format=duration \
+            -of default=noprint_wrappers=1:nokey=1 "$FILE")
+          python - "$DURATION" <<'PY'
+          import sys
+          duration=float(sys.argv[1])
+          assert abs(duration-8922.864) < 0.1, duration
+          print(f"Verified duration: {duration:.3f} seconds")
+          PY
+
+      - name: Upload exactly one complete audio file
+        uses: actions/upload-artifact@v4
+        with:
+          name: Gkentei-Continuation-VOICEVOX-Full
+          path: gkentei_continuation_ch11-24_voicevox_zundamon_metan_full.mp3
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
